@@ -2,7 +2,6 @@ import copy
 import logging
 from typing import Dict, Optional, Tuple
 
-import ray
 import ray.cloudpickle as pickle
 from ray.tune.sample import Categorical, Domain, Float, Integer, Quantized, \
     Uniform
@@ -28,7 +27,7 @@ class ZOOptSearch(Searcher):
     Asynchronous Sequential RAndomized COordinate Shrinking (ASRacos)
     is implemented in Tune.
 
-    To use ZOOptSearch, install zoopt (>=0.4.1): ``pip install -U zoopt``.
+    To use ZOOptSearch, install zoopt (>=0.4.0): ``pip install -U zoopt``.
 
     Tune automatically converts search spaces to ZOOpt"s format:
 
@@ -68,16 +67,11 @@ class ZOOptSearch(Searcher):
 
         dim_dict = {
             "height": (ValueType.CONTINUOUS, [-10, 10], 1e-2),
-            "width": (ValueType.DISCRETE, [-10, 10], False),
-            "layers": (ValueType.GRID, [4, 8, 16])
+            "width": (ValueType.DISCRETE, [-10, 10], False)
         }
 
         "config": {
             "iterations": 10,  # evaluation times
-        }
-
-        zoopt_search_config = {
-            "parallel_num": 8,  # how many workers to parallel
         }
 
         zoopt_search = ZOOptSearch(
@@ -85,9 +79,7 @@ class ZOOptSearch(Searcher):
             budget=20,  # must match `num_samples` in `tune.run()`.
             dim_dict=dim_dict,
             metric="mean_loss",
-            mode="min",
-            **zoopt_search_config
-        )
+            mode="min")
 
         tune.run(my_objective,
             config=config,
@@ -102,17 +94,14 @@ class ZOOptSearch(Searcher):
         budget (int): Number of samples.
         dim_dict (dict): Dimension dictionary.
             For continuous dimensions: (continuous, search_range, precision);
-            For discrete dimensions: (discrete, search_range, has_order);
-            For grid dimensions: (grid, grid_list).
+            For discrete dimensions: (discrete, search_range, has_order).
             More details can be found in zoopt package.
         metric (str): The training result objective value attribute.
             Defaults to "episode_reward_mean".
         mode (str): One of {min, max}. Determines whether objective is
             minimizing or maximizing the metric attribute.
             Defaults to "min".
-        parallel_num (int): How many workers to parallel. Note that initial
-            phase may start less workers than this number. More details can
-            be found in zoopt package.
+
     """
 
     optimizer = None
@@ -124,8 +113,7 @@ class ZOOptSearch(Searcher):
                  metric: Optional[str] = None,
                  mode: Optional[str] = None,
                  **kwargs):
-        assert zoopt is not None, "ZOOpt not found - please install zoopt " \
-                                  "by `pip install -U zoopt`."
+        assert zoopt is not None, "Zoopt not found - please install zoopt."
         assert budget is not None, "`budget` should not be None!"
         if mode:
             assert mode in ["min", "max"], "`mode` must be 'min' or 'max'."
@@ -149,9 +137,8 @@ class ZOOptSearch(Searcher):
         self.best_solution_list = []
         self.optimizer = None
 
-        self.kwargs = kwargs
-
-        super(ZOOptSearch, self).__init__(metric=self._metric, mode=mode)
+        super(ZOOptSearch, self).__init__(
+            metric=self._metric, mode=mode, **kwargs)
 
         if self._dim_dict:
             self.setup_zoopt()
@@ -166,8 +153,7 @@ class ZOOptSearch(Searcher):
         par = zoopt.Parameter(budget=self._budget)
         if self._algo == "sracos" or self._algo == "asracos":
             from zoopt.algos.opt_algorithms.racos.sracos import SRacosTune
-            self.optimizer = SRacosTune(
-                dimension=dim, parameter=par, **self.kwargs)
+            self.optimizer = SRacosTune(dimension=dim, parameter=par)
 
     def set_search_properties(self, metric: Optional[str], mode: Optional[str],
                               config: Dict) -> bool:
@@ -198,13 +184,6 @@ class ZOOptSearch(Searcher):
                 "`tune.run()`.".format(self.__class__.__name__, "space"))
 
         _solution = self.optimizer.suggest()
-
-        if _solution == "FINISHED":
-            if ray.__version__ >= "0.8.7":
-                return Searcher.FINISHED
-            else:
-                return None
-
         if _solution:
             self.solution_dict[str(trial_id)] = _solution
             _x = _solution.get_x()
@@ -269,12 +248,14 @@ class ZOOptSearch(Searcher):
                             True)
 
             elif isinstance(domain, Categorical):
-                # Categorical variables would use ValueType.DISCRETE with
+                # Categorical variables would use ValjeType.DISCRETE with
                 # has_partial_order=False, however, currently we do not
                 # keep track of category values and cannot automatically
                 # translate back and forth between them.
-                if isinstance(sampler, Uniform):
-                    return (ValueType.GRID, domain.categories)
+                raise ValueError(
+                    "ZOOpt does not support automatic conversion for "
+                    "categorical variables. Please instantiate ZOOpt with "
+                    "a manually defined search space.")
 
             raise ValueError("ZOOpt does not support parameters of type "
                              "`{}` with samplers of type `{}`".format(
